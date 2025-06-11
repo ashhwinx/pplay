@@ -68,6 +68,7 @@ router.post('/send', async (req, res) => {
     res.status(500).json({ message: 'Failed to send gift', error: error.message });
   }
 };
+)
 
 // Get gifts for couple
 router.get('/', async (req, res) => {
@@ -100,6 +101,7 @@ router.get('/', async (req, res) => {
     res.status(500).json({ message: 'Failed to get gifts', error: error.message });
   }
 };
+)
 
 // Open gift
 router.post('/:id/open', async (req, res) => {
@@ -135,6 +137,7 @@ router.post('/:id/open', async (req, res) => {
     res.status(500).json({ message: 'Failed to open gift', error: error.message });
   }
 };
+)
 
 // React to gift
 router.post('/:id/react', async (req, res) => {
@@ -175,6 +178,7 @@ router.post('/:id/react', async (req, res) => {
     res.status(500).json({ message: 'Failed to react to gift', error: error.message });
   }
 };
+)
 
 // Get gift statistics
 router.get('/stats', async (req, res) => {

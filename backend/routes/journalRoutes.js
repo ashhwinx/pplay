@@ -68,6 +68,7 @@ router.post('/new', async (req, res) => {
     res.status(500).json({ message: 'Failed to create journal entry', error: error.message });
   }
 };
+)
 
 // Get journal entries for couple
 router.get('/', async (req, res) => {
@@ -105,6 +106,7 @@ router.get('/', async (req, res) => {
     res.status(500).json({ message: 'Failed to get journal entries', error: error.message });
   }
 };
+)
 
 // Get single journal entry
 router.get('/:id', async (req, res) => {
@@ -171,6 +173,7 @@ router.post('/:id/react', async (req, res) => {
     res.status(500).json({ message: 'Failed to add reaction', error: error.message });
   }
 };
+)
 
 // Add comment to journal entry
 router.post('/:id/comment', async (req, res) => {
@@ -216,6 +219,7 @@ router.post('/:id/comment', async (req, res) => {
     res.status(500).json({ message: 'Failed to add comment', error: error.message });
   }
 };
+)
 
 // Update journal entry
 router.put('/:id', async (req, res) => {
@@ -259,6 +263,7 @@ router.put('/:id', async (req, res) => {
     res.status(500).json({ message: 'Failed to update journal entry', error: error.message });
   }
 };
+)
 
 // Delete journal entry
 router.delete('/:id', async (req, res) => {
