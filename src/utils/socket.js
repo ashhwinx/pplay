@@ -5,6 +5,7 @@ class SocketManager {
     this.socket = null;
     this.isConnected = false;
     this.listeners = new Map();
+    this.userId = null;
   }
 
   connect(userId) {
@@ -12,11 +13,15 @@ class SocketManager {
       this.disconnect();
     }
 
-    const serverUrl = import.meta.env.VITE_API_URL?.replace('/api', '') || 'http://localhost:5000';
+    this.userId = userId;
+    const serverUrl = import.meta.env.VITE_SOCKET_URL || 'http://localhost:5000';
+    
+    console.log('Connecting to socket server:', serverUrl);
     
     this.socket = io(serverUrl, {
       transports: ['websocket', 'polling'],
       timeout: 20000,
+      forceNew: true
     });
 
     this.socket.on('connect', () => {
@@ -26,6 +31,7 @@ class SocketManager {
       // Join with user ID
       if (userId) {
         this.socket.emit('join', userId);
+        console.log('Joined socket with user ID:', userId);
       }
     });
 
@@ -36,6 +42,10 @@ class SocketManager {
 
     this.socket.on('connect_error', (error) => {
       console.error('❌ Socket connection error:', error);
+    });
+
+    this.socket.on('error', (error) => {
+      console.error('❌ Socket error:', error);
     });
 
     // Re-register all listeners
@@ -51,11 +61,13 @@ class SocketManager {
       this.socket.disconnect();
       this.socket = null;
       this.isConnected = false;
+      this.userId = null;
     }
   }
 
   emit(event, data) {
     if (this.socket && this.isConnected) {
+      console.log('Emitting event:', event, data);
       this.socket.emit(event, data);
     } else {
       console.warn('Socket not connected, cannot emit:', event);
@@ -78,7 +90,10 @@ class SocketManager {
 
   // Game-specific methods
   inviteToGame(gameData) {
-    this.emit('invite_game', gameData);
+    this.emit('invite_game', {
+      ...gameData,
+      inviterName: gameData.inviterName || 'Your partner'
+    });
   }
 
   joinGame(gameSessionId) {
@@ -87,6 +102,10 @@ class SocketManager {
 
   makeGameMove(gameSessionId, move) {
     this.emit('game_move', { gameSessionId, move });
+  }
+
+  endGame(gameSessionId, winner, finalScores) {
+    this.emit('end_game', { gameSessionId, winner, finalScores });
   }
 
   // Watch together methods
@@ -101,6 +120,16 @@ class SocketManager {
 
   sendTyping(coupleId, isTyping) {
     this.emit('typing', { coupleId, isTyping });
+  }
+
+  // Gift methods
+  sendGift(coupleId, giftData) {
+    this.emit('gift_sent', { coupleId, giftData });
+  }
+
+  // Journal methods
+  addJournalEntry(coupleId, journalData) {
+    this.emit('journal_added', { coupleId, journalData });
   }
 }
 

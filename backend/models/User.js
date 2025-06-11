@@ -43,6 +43,10 @@ const userSchema = new mongoose.Schema({
     ref: 'User',
     default: null
   },
+  socketId: {
+    type: String,
+    default: null
+  },
   isOnline: {
     type: Boolean,
     default: false

@@ -34,7 +34,7 @@ router.post('/send', async (req, res) => {
     const couple = await Couple.findById(user.coupleId);
     await couple.updateStats('giftsExchanged');
 
-    // Add activity
+    // Add activity and broadcast
     await couple.addActivity({
       type: 'gift',
       description: `Sent a ${type} gift`,
@@ -43,14 +43,18 @@ router.post('/send', async (req, res) => {
       metadata: {
         giftId: gift._id
       }
-    });
+    }, req.io);
 
     // Emit real-time notification if immediate
     if (deliveryType === 'immediate' && req.io) {
       req.io.to(`couple_${user.coupleId}`).emit('gift_received', {
         gift: {
           ...gift.toObject(),
-          sender: { name: user.name, avatar: user.avatar }
+          sender: { 
+            id: user._id,
+            name: user.name, 
+            avatar: user.avatar 
+          }
         }
       });
     }
@@ -63,7 +67,7 @@ router.post('/send', async (req, res) => {
     console.error('Send gift error:', error);
     res.status(500).json({ message: 'Failed to send gift', error: error.message });
   }
-});
+};
 
 // Get gifts for couple
 router.get('/', async (req, res) => {
@@ -95,7 +99,7 @@ router.get('/', async (req, res) => {
     console.error('Get gifts error:', error);
     res.status(500).json({ message: 'Failed to get gifts', error: error.message });
   }
-});
+};
 
 // Open gift
 router.post('/:id/open', async (req, res) => {
@@ -117,12 +121,20 @@ router.post('/:id/open', async (req, res) => {
 
     await gift.save();
 
+    // Notify sender via socket
+    if (req.io) {
+      req.io.to(`couple_${gift.coupleId}`).emit('gift_opened', {
+        giftId: gift._id,
+        openedBy: req.user._id
+      });
+    }
+
     res.json({ message: 'Gift opened successfully', gift });
   } catch (error) {
     console.error('Open gift error:', error);
     res.status(500).json({ message: 'Failed to open gift', error: error.message });
   }
-});
+};
 
 // React to gift
 router.post('/:id/react', async (req, res) => {
@@ -162,7 +174,7 @@ router.post('/:id/react', async (req, res) => {
     console.error('React to gift error:', error);
     res.status(500).json({ message: 'Failed to react to gift', error: error.message });
   }
-});
+};
 
 // Get gift statistics
 router.get('/stats', async (req, res) => {

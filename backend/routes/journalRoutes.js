@@ -33,13 +33,31 @@ router.post('/new', async (req, res) => {
     const couple = await Couple.findById(user.coupleId);
     await couple.updateStats('memoriesShared');
     
-    // Add activity
+    // Add activity and broadcast to partner
     await couple.addActivity({
       type: 'journal',
       description: `Added a new memory: "${title}"`,
       userId: req.user._id,
       icon: '📖'
-    });
+    }, req.io);
+
+    // Emit to partner via socket
+    if (req.io) {
+      req.io.to(`couple_${user.coupleId}`).emit('journal_updated', {
+        journal: {
+          id: journal._id,
+          title: journal.title,
+          content: journal.content,
+          mood: journal.mood,
+          author: {
+            id: user._id,
+            name: user.name,
+            avatar: user.avatar
+          }
+        },
+        author: req.user._id
+      });
+    }
 
     res.status(201).json({
       message: 'Journal entry created successfully',
@@ -49,7 +67,7 @@ router.post('/new', async (req, res) => {
     console.error('Create journal error:', error);
     res.status(500).json({ message: 'Failed to create journal entry', error: error.message });
   }
-});
+};
 
 // Get journal entries for couple
 router.get('/', async (req, res) => {
@@ -79,14 +97,14 @@ router.get('/', async (req, res) => {
     res.json({
       journals,
       totalPages: Math.ceil(total / limit),
-      currentPage: page,
+      currentPage: parseInt(page),
       total
     });
   } catch (error) {
     console.error('Get journals error:', error);
     res.status(500).json({ message: 'Failed to get journal entries', error: error.message });
   }
-});
+};
 
 // Get single journal entry
 router.get('/:id', async (req, res) => {
@@ -137,12 +155,22 @@ router.post('/:id/react', async (req, res) => {
 
     await journal.save();
 
+    // Notify partner via socket
+    if (req.io) {
+      const user = await require('../models/User').findById(req.user._id);
+      req.io.to(`couple_${journal.coupleId}`).emit('journal_reaction', {
+        journalId: journal._id,
+        reaction: { type, userId: req.user._id },
+        from: { name: user.name, avatar: user.avatar }
+      });
+    }
+
     res.json({ message: 'Reaction added successfully', reactions: journal.reactions });
   } catch (error) {
     console.error('Add reaction error:', error);
     res.status(500).json({ message: 'Failed to add reaction', error: error.message });
   }
-});
+};
 
 // Add comment to journal entry
 router.post('/:id/comment', async (req, res) => {
@@ -165,6 +193,20 @@ router.post('/:id/comment', async (req, res) => {
     const populatedJournal = await Journal.findById(req.params.id)
       .populate('comments.userId', 'name avatar');
 
+    // Notify partner via socket
+    if (req.io) {
+      const user = await require('../models/User').findById(req.user._id);
+      req.io.to(`couple_${journal.coupleId}`).emit('journal_comment', {
+        journalId: journal._id,
+        comment: {
+          content,
+          userId: req.user._id,
+          user: { name: user.name, avatar: user.avatar },
+          timestamp: new Date()
+        }
+      });
+    }
+
     res.json({ 
       message: 'Comment added successfully', 
       comments: populatedJournal.comments 
@@ -173,7 +215,7 @@ router.post('/:id/comment', async (req, res) => {
     console.error('Add comment error:', error);
     res.status(500).json({ message: 'Failed to add comment', error: error.message });
   }
-});
+};
 
 // Update journal entry
 router.put('/:id', async (req, res) => {
@@ -199,12 +241,24 @@ router.put('/:id', async (req, res) => {
 
     await journal.save();
 
+    // Notify partner via socket
+    if (req.io) {
+      req.io.to(`couple_${journal.coupleId}`).emit('journal_updated', {
+        journal: {
+          id: journal._id,
+          title: journal.title,
+          content: journal.content,
+          mood: journal.mood
+        }
+      });
+    }
+
     res.json({ message: 'Journal entry updated successfully', journal });
   } catch (error) {
     console.error('Update journal error:', error);
     res.status(500).json({ message: 'Failed to update journal entry', error: error.message });
   }
-});
+};
 
 // Delete journal entry
 router.delete('/:id', async (req, res) => {

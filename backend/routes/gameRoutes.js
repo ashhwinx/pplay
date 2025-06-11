@@ -3,6 +3,7 @@ const router = express.Router();
 const verifyToken = require('../utils/verifyToken');
 const GameSession = require('../models/GameSession');
 const Couple = require('../models/Couple');
+const User = require('../models/User');
 
 // All routes are protected
 router.use(verifyToken);
@@ -12,7 +13,7 @@ router.post('/create', async (req, res) => {
   try {
     const { gameType, settings } = req.body;
     
-    const user = await require('../models/User').findById(req.user._id);
+    const user = await User.findById(req.user._id);
     if (!user.coupleId || !user.partnerId) {
       return res.status(404).json({ message: 'No partner found' });
     }
@@ -23,24 +24,34 @@ router.post('/create', async (req, res) => {
       players: [req.user._id],
       gameData: {
         settings: settings || {},
-        scores: new Map([[req.user._id.toString(), 0]])
+        scores: new Map([[req.user._id.toString(), 0]]),
+        currentPlayer: req.user._id
       }
     });
 
     await gameSession.save();
 
-    // Emit invitation to partner
+    // Emit invitation to partner via socket
     if (req.io) {
-      req.io.to(`couple_${user.coupleId}`).emit('game_invitation', {
+      req.io.to(`user_${user.partnerId}`).emit('game_invitation', {
         gameSessionId: gameSession._id,
         gameType,
-        inviter: { name: user.name, avatar: user.avatar }
+        inviter: { 
+          id: user._id,
+          name: user.name, 
+          avatar: user.avatar 
+        }
       });
     }
 
     res.status(201).json({
       message: 'Game session created successfully',
-      gameSession
+      gameSession: {
+        id: gameSession._id,
+        gameType: gameSession.gameType,
+        status: gameSession.status,
+        players: gameSession.players
+      }
     });
   } catch (error) {
     console.error('Create game error:', error);
@@ -57,7 +68,7 @@ router.post('/:id/join', async (req, res) => {
     }
 
     // Check if user is part of the couple
-    const user = await require('../models/User').findById(req.user._id);
+    const user = await User.findById(req.user._id);
     if (gameSession.coupleId.toString() !== user.coupleId.toString()) {
       return res.status(403).json({ message: 'Access denied' });
     }
@@ -77,18 +88,37 @@ router.post('/:id/join', async (req, res) => {
 
     await gameSession.save();
 
-    // Notify all players
+    // Notify all players via socket
     if (req.io) {
       req.io.to(`couple_${gameSession.coupleId}`).emit('game_joined', {
         gameSessionId: gameSession._id,
-        player: { name: user.name, avatar: user.avatar },
-        status: gameSession.status
+        player: { 
+          id: user._id,
+          name: user.name, 
+          avatar: user.avatar 
+        },
+        status: gameSession.status,
+        players: gameSession.players
       });
+
+      if (gameSession.status === 'active') {
+        req.io.to(`couple_${gameSession.coupleId}`).emit('game_started', {
+          gameSessionId: gameSession._id,
+          players: gameSession.players,
+          currentPlayer: gameSession.gameData.currentPlayer
+        });
+      }
     }
 
     res.json({
       message: 'Joined game successfully',
-      gameSession
+      gameSession: {
+        id: gameSession._id,
+        gameType: gameSession.gameType,
+        status: gameSession.status,
+        players: gameSession.players,
+        currentPlayer: gameSession.gameData.currentPlayer
+      }
     });
   } catch (error) {
     console.error('Join game error:', error);
@@ -127,7 +157,7 @@ router.post('/:id/move', async (req, res) => {
 
     await gameSession.save();
 
-    // Broadcast move to other players
+    // Broadcast move to other players via socket
     if (req.io) {
       req.io.to(`couple_${gameSession.coupleId}`).emit('game_move', {
         gameSessionId: gameSession._id,
@@ -139,7 +169,11 @@ router.post('/:id/move', async (req, res) => {
 
     res.json({
       message: 'Move made successfully',
-      gameSession
+      gameSession: {
+        id: gameSession._id,
+        currentPlayer: gameSession.gameData.currentPlayer,
+        moves: gameSession.moves
+      }
     });
   } catch (error) {
     console.error('Make move error:', error);
@@ -172,7 +206,7 @@ router.post('/:id/end', async (req, res) => {
     await couple.updateStats('gamesPlayed');
 
     // Add activity
-    const winnerUser = await require('../models/User').findById(winner);
+    const winnerUser = await User.findById(winner);
     await couple.addActivity({
       type: 'game',
       description: `${winnerUser.name} won ${gameSession.gameType}!`,
@@ -182,9 +216,9 @@ router.post('/:id/end', async (req, res) => {
         gameType: gameSession.gameType,
         duration: gameSession.duration
       }
-    });
+    }, req.io);
 
-    // Notify players
+    // Notify players via socket
     if (req.io) {
       req.io.to(`couple_${gameSession.coupleId}`).emit('game_ended', {
         gameSessionId: gameSession._id,
@@ -195,7 +229,12 @@ router.post('/:id/end', async (req, res) => {
 
     res.json({
       message: 'Game ended successfully',
-      gameSession
+      gameSession: {
+        id: gameSession._id,
+        status: gameSession.status,
+        winner: gameSession.winner,
+        finalScores: Object.fromEntries(gameSession.gameData.scores)
+      }
     });
   } catch (error) {
     console.error('End game error:', error);
@@ -208,7 +247,7 @@ router.get('/history', async (req, res) => {
   try {
     const { page = 1, limit = 10, gameType } = req.query;
     
-    const user = await require('../models/User').findById(req.user._id);
+    const user = await User.findById(req.user._id);
     if (!user.coupleId) {
       return res.status(404).json({ message: 'No couple relationship found' });
     }
@@ -232,7 +271,7 @@ router.get('/history', async (req, res) => {
     res.json({
       games,
       totalPages: Math.ceil(total / limit),
-      currentPage: page,
+      currentPage: parseInt(page),
       total
     });
   } catch (error) {
@@ -244,7 +283,7 @@ router.get('/history', async (req, res) => {
 // Get game statistics
 router.get('/stats', async (req, res) => {
   try {
-    const user = await require('../models/User').findById(req.user._id);
+    const user = await User.findById(req.user._id);
     if (!user.coupleId) {
       return res.status(404).json({ message: 'No couple relationship found' });
     }

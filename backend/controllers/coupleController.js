@@ -8,8 +8,10 @@ const connectWithPartner = async (req, res) => {
     const { coupleCode } = req.body;
     const currentUser = req.user;
 
+    console.log(`User ${currentUser.name} trying to connect with code: ${coupleCode}`);
+
     // Find partner by couple code
-    const partner = await User.findOne({ coupleCode });
+    const partner = await User.findOne({ coupleCode: coupleCode.toUpperCase() });
     if (!partner) {
       return res.status(404).json({ message: 'Invalid couple code' });
     }
@@ -19,7 +21,7 @@ const connectWithPartner = async (req, res) => {
       return res.status(400).json({ message: 'Cannot connect with yourself' });
     }
 
-    // Check if already connected
+    // Check if current user is already connected
     if (currentUser.partnerId) {
       return res.status(400).json({ message: 'You are already connected with a partner' });
     }
@@ -44,7 +46,7 @@ const connectWithPartner = async (req, res) => {
 
     await couple.save();
 
-    // Update both users
+    // Update both users with couple information
     await User.findByIdAndUpdate(currentUser._id, {
       coupleId: couple._id,
       partnerId: partner._id
@@ -61,7 +63,44 @@ const connectWithPartner = async (req, res) => {
       description: `${currentUser.name} and ${partner.name} are now connected! 💕`,
       userId: currentUser._id,
       icon: '💑'
-    });
+    }, req.io);
+
+    // Emit real-time updates to both users
+    if (req.io) {
+      // Notify both users about the connection
+      req.io.to(`user_${currentUser._id}`).emit('partner_connected', {
+        partner: {
+          id: partner._id,
+          name: partner.name,
+          avatar: partner.avatar,
+          isOnline: partner.isOnline
+        },
+        coupleId: couple._id
+      });
+
+      req.io.to(`user_${partner._id}`).emit('partner_connected', {
+        partner: {
+          id: currentUser._id,
+          name: currentUser.name,
+          avatar: currentUser.avatar,
+          isOnline: currentUser.isOnline
+        },
+        coupleId: couple._id
+      });
+
+      // Join both users to couple room
+      const currentUserSocket = req.io.sockets.sockets.get(currentUser.socketId);
+      const partnerSocket = req.io.sockets.sockets.get(partner.socketId);
+      
+      if (currentUserSocket) {
+        currentUserSocket.join(`couple_${couple._id}`);
+      }
+      if (partnerSocket) {
+        partnerSocket.join(`couple_${couple._id}`);
+      }
+    }
+
+    console.log(`Successfully connected ${currentUser.name} and ${partner.name}`);
 
     res.json({
       message: 'Successfully connected with your partner!',
@@ -106,7 +145,8 @@ const getCoupleInfo = async (req, res) => {
         stats: couple.stats,
         milestones: couple.milestones,
         partner: user.partnerId,
-        isConnected: true
+        isConnected: true,
+        recentActivities: couple.recentActivities
       }
     });
   } catch (error) {
@@ -136,13 +176,13 @@ const addMilestone = async (req, res) => {
 
     await couple.save();
 
-    // Add activity
+    // Add activity and broadcast
     await couple.addActivity({
       type: 'milestone',
       description: `Added milestone: ${title}`,
       userId: req.user._id,
       icon: '🎉'
-    });
+    }, req.io);
 
     res.json({
       message: 'Milestone added successfully',
@@ -210,6 +250,11 @@ const disconnectCouple = async (req, res) => {
       'settings.isActive': false,
       disconnectedAt: new Date()
     });
+
+    // Emit disconnection to both users
+    if (req.io) {
+      req.io.to(`couple_${couple._id}`).emit('partner_disconnected');
+    }
 
     res.json({ message: 'Couple relationship ended successfully' });
   } catch (error) {

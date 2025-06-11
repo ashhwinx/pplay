@@ -54,8 +54,11 @@ const login = async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    // Find user by email
-    const user = await User.findOne({ email }).populate('coupleId partnerId');
+    // Find user by email and populate partner info
+    const user = await User.findOne({ email })
+      .populate('coupleId')
+      .populate('partnerId', 'name email avatar isOnline lastSeen');
+    
     if (!user) {
       return res.status(401).json({ message: 'Invalid email or password' });
     }
@@ -85,6 +88,7 @@ const login = async (req, res) => {
         coupleCode: user.coupleCode,
         coupleId: user.coupleId,
         partnerId: user.partnerId,
+        partner: user.partnerId, // Include partner info
         isOnline: user.isOnline
       }
     });
@@ -110,7 +114,7 @@ const getMe = async (req, res) => {
         coupleCode: user.coupleCode,
         coupleId: user.coupleId,
         partnerId: user.partnerId,
-        partner: user.partnerId,
+        partner: user.partnerId, // Include partner info
         isOnline: user.isOnline,
         lastSeen: user.lastSeen,
         preferences: user.preferences
@@ -128,7 +132,8 @@ const logout = async (req, res) => {
     // Update user offline status
     await User.findByIdAndUpdate(req.user._id, {
       isOnline: false,
-      lastSeen: new Date()
+      lastSeen: new Date(),
+      socketId: null
     });
 
     res.json({ message: 'Logout successful' });

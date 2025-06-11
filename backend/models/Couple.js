@@ -90,7 +90,14 @@ const coupleSchema = new mongoose.Schema({
     allowNotifications: {
       type: Boolean,
       default: true
+    },
+    isActive: {
+      type: Boolean,
+      default: true
     }
+  },
+  disconnectedAt: {
+    type: Date
   }
 }, {
   timestamps: true
@@ -113,8 +120,8 @@ coupleSchema.methods.updateStats = function(statType, increment = 1) {
   return this.save();
 };
 
-// Add activity
-coupleSchema.methods.addActivity = function(activityData) {
+// Add activity and broadcast to both users
+coupleSchema.methods.addActivity = function(activityData, io) {
   this.recentActivities.unshift({
     ...activityData,
     timestamp: new Date()
@@ -123,6 +130,13 @@ coupleSchema.methods.addActivity = function(activityData) {
   // Keep only last 50 activities
   if (this.recentActivities.length > 50) {
     this.recentActivities = this.recentActivities.slice(0, 50);
+  }
+  
+  // Broadcast to couple room if socket.io is available
+  if (io) {
+    io.to(`couple_${this._id}`).emit('new_activity', {
+      activity: this.recentActivities[0]
+    });
   }
   
   return this.save();

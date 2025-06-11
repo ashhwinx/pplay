@@ -65,7 +65,7 @@ interface CoupleProviderProps {
 }
 
 export const CoupleProvider: React.FC<CoupleProviderProps> = ({ children }) => {
-  const { user, updateUser } = useAuth();
+  const { user, updateUser, refreshUser } = useAuth();
   const [partner, setPartner] = useState<Partner | null>(null);
   const [coupleId, setCoupleId] = useState<string | null>(null);
   const [isConnected, setIsConnected] = useState(false);
@@ -85,6 +85,8 @@ export const CoupleProvider: React.FC<CoupleProviderProps> = ({ children }) => {
 
   useEffect(() => {
     if (user?.coupleId && user?.partnerId) {
+      setIsConnected(true);
+      setCoupleId(user.coupleId);
       refreshCoupleData();
       refreshActivities();
       
@@ -102,25 +104,65 @@ export const CoupleProvider: React.FC<CoupleProviderProps> = ({ children }) => {
       socketManager.off('partner_status');
       socketManager.off('new_activity');
       socketManager.off('gift_received');
+      socketManager.off('partner_connected');
+      socketManager.off('partner_disconnected');
+      socketManager.off('journal_updated');
     };
   }, [user]);
 
   const setupSocketListeners = () => {
+    // Partner connection updates
+    socketManager.on('partner_connected', (data) => {
+      console.log('Partner connected:', data);
+      setPartner({
+        id: data.partner.id,
+        name: data.partner.name,
+        avatar: data.partner.avatar,
+        status: data.partner.isOnline ? 'online' : 'offline'
+      });
+      setCoupleId(data.coupleId);
+      setIsConnected(true);
+      
+      // Refresh user data to get updated couple info
+      refreshUser();
+      
+      toast.success(`Connected with ${data.partner.name}! 💕`);
+    });
+
     // Partner status updates
     socketManager.on('partner_status', (data) => {
       if (data.userId === user?.partnerId) {
-        setPartner(prev => prev ? { ...prev, status: data.status } : null);
+        setPartner(prev => prev ? { 
+          ...prev, 
+          status: data.status === 'online' ? 'online' : 'offline' 
+        } : null);
       }
     });
 
     // New activity updates
     socketManager.on('new_activity', (data) => {
+      console.log('New activity received:', data);
       setActivities(prev => [data.activity, ...prev.slice(0, 49)]);
     });
 
     // Gift notifications
     socketManager.on('gift_received', (data) => {
-      toast.success(`You received a ${data.gift.type} from ${data.gift.sender.name}! 🎁`);
+      toast.success(`You received a ${data.gift.type} from ${data.gift.sender?.name || 'your partner'}! 🎁`);
+      refreshActivities();
+    });
+
+    // Partner disconnection
+    socketManager.on('partner_disconnected', () => {
+      setIsConnected(false);
+      setPartner(null);
+      setCoupleId(null);
+      setActivities([]);
+      toast.error('Your partner has disconnected');
+    });
+
+    // Journal updates
+    socketManager.on('journal_updated', (data) => {
+      toast.success('Your partner added a new memory! 📖');
       refreshActivities();
     });
   };
@@ -139,14 +181,18 @@ export const CoupleProvider: React.FC<CoupleProviderProps> = ({ children }) => {
       });
       
       // Set partner info from user data
-      if (user?.partner) {
-        setPartner({
-          id: user.partner.id,
-          name: user.partner.name,
-          avatar: user.partner.avatar,
-          status: user.partner.isOnline ? 'online' : 'offline',
-          lastSeen: user.partner.lastSeen ? new Date(user.partner.lastSeen) : undefined
-        });
+      if (user?.partnerId) {
+        // Get partner info from the couple data or make a separate call
+        const partnerInfo = user.partner || coupleData.partner;
+        if (partnerInfo) {
+          setPartner({
+            id: partnerInfo.id,
+            name: partnerInfo.name,
+            avatar: partnerInfo.avatar,
+            status: partnerInfo.isOnline ? 'online' : 'offline',
+            lastSeen: partnerInfo.lastSeen ? new Date(partnerInfo.lastSeen) : undefined
+          });
+        }
       }
     } catch (error) {
       console.error('Failed to refresh couple data:', error);
@@ -182,8 +228,11 @@ export const CoupleProvider: React.FC<CoupleProviderProps> = ({ children }) => {
 
   const connectWithPartner = async (coupleCode: string): Promise<boolean> => {
     try {
+      console.log('Attempting to connect with couple code:', coupleCode);
       const response = await coupleAPI.connect(coupleCode);
       const { couple } = response.data;
+      
+      console.log('Connection response:', response.data);
       
       setCoupleId(couple.id);
       setIsConnected(true);
@@ -199,7 +248,7 @@ export const CoupleProvider: React.FC<CoupleProviderProps> = ({ children }) => {
         id: couple.partner.id,
         name: couple.partner.name,
         avatar: couple.partner.avatar,
-        status: couple.partner.isOnline ? '온라인' : 'offline',
+        status: couple.partner.isOnline ? 'online' : 'offline',
         lastSeen: couple.partner.lastSeen ? new Date(couple.partner.lastSeen) : undefined
       });
 
